@@ -10,7 +10,7 @@ def main(portal_address=None, username=None, password=None, totp_key=None,
          cookie_tid=None, cookie_sig=None, keepalive=200, data_dir="./data",
          driver_type=None, driver_path=None, browser_path=None,
          interactive=True, wait_atrust=False,
-         cas=False, cas_service=None, fingerprint=None):
+         cas=False, fingerprint=None):
 
     if cas:
         from cas_login import run as cas_run
@@ -19,7 +19,7 @@ def main(portal_address=None, username=None, password=None, totp_key=None,
             keepalive=keepalive, data_dir=data_dir,
             driver_type=driver_type, driver_path=driver_path,
             browser_path=browser_path, interactive=interactive,
-            cas_service=cas_service, fingerprint=fingerprint,
+            fingerprint=fingerprint,
         )
     else:
         from normal_login import run as normal_run

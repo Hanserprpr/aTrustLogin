@@ -12,20 +12,21 @@ from core import ATrustLogin, prompt_params
 from sdu_cas import SDUCAS, DeviceFingerprint, CasException
 
 portal_addr = "https://vpn.sdu.edu.cn"
+cas_service = "https://vpn.sdu.edu.cn:443/passport/v1/auth/cas"
+
 
 def run(username=None, password=None, keepalive=200, data_dir="./data",
         driver_type=None, driver_path=None, browser_path=None,
-        interactive=True, cas_service=None, fingerprint=None):
+        interactive=True, fingerprint=None):
 
     args = prompt_params({
         "username": username, "password": password,
-        "cas_service": cas_service, "interactive": interactive,
+        "interactive": interactive,
         "fingerprint": fingerprint,
-    }, ["username", "password", "cas_service"], [("fingerprint", "设备指纹(details)", False)])
+    }, ["username", "password"], [("fingerprint", "设备指纹(details)", False)])
 
     username = args["username"]
     password = args["password"]
-    cas_service = args["cas_service"]
     fp_details = args.get("fingerprint") or "aTrustLogin-py-v1"
 
     fps = DeviceFingerprint(details=fp_details)
