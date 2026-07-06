@@ -3,7 +3,7 @@ import os.path
 import pickle
 import platform
 import re
-import signal
+import json
 import socket
 import subprocess
 import time
@@ -75,64 +75,68 @@ class ATrustLogin:
         if driver_type == "edge":
             from selenium.webdriver.edge.options import Options
             from selenium.webdriver.edge.service import Service
+
+            self.options = Options()
+            self.options.add_argument("--user-data-dir=/tmp/edge-data")
+            self.options.add_argument('--profile-directory=ATrustLogin')
+            self.options.add_argument("--ignore-certificate-errors")
+            self.options.add_argument("--ignore-ssl-errors")
+            self.options.add_argument("--no-sandbox")
+            self.options.add_argument("--lang=zh-CN")
+            self.options.add_argument("--disable-gpu")
+            self.options.add_argument("--disable-extensions")
+            self.options.add_argument("--window-size=896,672")
+
+            if browser_path is not None:
+                self.options.binary_location = browser_path
+
+            self.driver = webdriver.Edge(service=Service(driver_path), options=self.options)
+            
         else:
-            from selenium.webdriver.chrome.service import Service
             from selenium.webdriver.chrome.options import Options
 
-        self.options = Options()
+            DEBUG_PORT = "12345"
+            PROFILE_DIR = "Default"
 
-        self.options.add_argument(f'--profile-directory=ATrustLogin')
-        self.options.add_argument("--ignore-certificate-errors")
-        self.options.add_argument("--ignore-ssl-errors")
-        self.options.add_argument("--no-sandbox")
-        self.options.add_argument("--lang=zh-CN")
-        self.options.add_argument("--disable-gpu")
-        self.options.add_argument("--disable-extensions")
-        self.options.add_argument("--window-size=896,672")
+            binary_location = browser_path or "/usr/bin/chromium"
+            chrome_data_dir = os.path.join("/tmp", "chrome-data")
+            log_file = os.path.join(chrome_data_dir, "chrome.log")
+            os.makedirs(chrome_data_dir, exist_ok=True)
 
-        self.options.add_experimental_option("prefs", {"intl.accept_languages": "zh-CN"})
-
-        if browser_path is not None:
-            self.options.binary_location = browser_path
-
-        if driver_type == "edge":
-            self.driver = webdriver.Edge(service=Service(driver_path), options=self.options)
-        else:
-            chrome_port = "12345"
-            chrome_profile = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "atrust-chrome-profile")
-            os.makedirs(chrome_profile, exist_ok=True)
-            chrome_log = open(os.path.join(self.data_dir, "chrome.log"), "w")
-            browser = browser_path or self.options.binary_location or "/usr/bin/chromium"
-            logger.info(f"Starting Chrome with debug port {chrome_port}")
-            self.chrome_process = subprocess.Popen(
-                [browser,
-                 "--no-sandbox", "--disable-gpu", "--disable-extensions",
-                 "--disable-dev-shm-usage", "--window-size=896,672",
-                 "--lang=zh-CN", "--ignore-certificate-errors",
-                 "--ignore-ssl-errors",
-                 f"--remote-debugging-port={chrome_port}",
-                 f"--user-data-dir={chrome_profile}",
-                 "data:,"],
-                stdout=chrome_log, stderr=subprocess.STDOUT
+            logger.info(f"Starting Chrome with debug port {DEBUG_PORT}")
+            self.chrome_process = subprocess.Popen([
+                    binary_location,
+                    f"--remote-debugging-port={DEBUG_PORT}",
+                    f"--user-data-dir={chrome_data_dir}",
+                    f"--profile-directory={PROFILE_DIR}",
+                    "--ignore-certificate-errors",
+                    "--ignore-ssl-errors", 
+                    "--no-sandbox", 
+                    "--lang=zh-CN", 
+                    "--disable-gpu", 
+                    "--disable-extensions",
+                    "--window-size=896,672",
+                    "data:,"
+                ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT
             )
+
             logger.info(f"Chrome started, PID {self.chrome_process.pid}, waiting for DevTools ...")
             while True:
                 if self.chrome_process.poll() is not None:
-                    logger.error(f"Chrome process exited prematurely (code {self.chrome_process.returncode})")
                     raise RuntimeError(f"Chrome exited with code {self.chrome_process.returncode}")
                 try:
-                    urllib.request.urlopen(f"http://127.0.0.1:{chrome_port}/json/version")
-                    logger.info("DevTools has been detected ready.")
+                    urllib.request.urlopen(f"http://127.0.0.1:{DEBUG_PORT}/json/version")
+                    logger.info("DevTools ready.")
                     break
                 except:
-                    logger.info(f"DevTools is not ready yet. Waiting for DevTools ...")
                     time.sleep(3)
 
-            self.options.debugger_address = f"127.0.0.1:{chrome_port}"
+            self.options = Options()
+            self.options.debugger_address = f"127.0.0.1:{DEBUG_PORT}"
             self.driver = webdriver.Chrome(options=self.options)
 
         self.wait = WebDriverWait(self.driver, 10)
-        logger.debug("ATrustLogin init successfully.")
+        logger.debug("Selenium init successfully.")
 
     def open_portal(self):
         self.driver.get(self.portal_address)
