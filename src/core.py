@@ -3,8 +3,11 @@ import os.path
 import pickle
 import platform
 import re
+import signal
 import socket
+import subprocess
 import time
+import urllib.request
 from typing import Dict, List, Any
 from urllib.parse import urlparse
 
@@ -47,8 +50,7 @@ class ATrustLoginStorage(BaseModel):
 
 
 class ATrustLogin:
-    def __init__(self, portal_address, driver_path=None, browser_path=None, driver_type=None,
-                 data_dir="data", cookie_tid=None, cookie_sig=None, interactive=False):
+    def __init__(self, portal_address, driver_path=None, browser_path=None, driver_type=None, data_dir="data", cookie_tid=None, cookie_sig=None, interactive=False):
         if not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
         self.data_dir = data_dir
@@ -93,14 +95,44 @@ class ATrustLogin:
         if browser_path is not None:
             self.options.binary_location = browser_path
 
-        service = Service(driver_path)
-
         if driver_type == "edge":
-            self.driver = webdriver.Edge(service=service, options=self.options)
+            self.driver = webdriver.Edge(service=Service(driver_path), options=self.options)
         else:
-            self.driver = webdriver.Chrome(service=service, options=self.options)
+            chrome_port = "12345"
+            chrome_profile = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "atrust-chrome-profile")
+            os.makedirs(chrome_profile, exist_ok=True)
+            chrome_log = open(os.path.join(self.data_dir, "chrome.log"), "w")
+            browser = browser_path or self.options.binary_location or "/usr/bin/chromium"
+            logger.info(f"Starting Chrome with debug port {chrome_port}")
+            self.chrome_process = subprocess.Popen(
+                [browser,
+                 "--no-sandbox", "--disable-gpu", "--disable-extensions",
+                 "--disable-dev-shm-usage", "--window-size=896,672",
+                 "--lang=zh-CN", "--ignore-certificate-errors",
+                 "--ignore-ssl-errors",
+                 f"--remote-debugging-port={chrome_port}",
+                 f"--user-data-dir={chrome_profile}",
+                 "data:,"],
+                stdout=chrome_log, stderr=subprocess.STDOUT
+            )
+            logger.info(f"Chrome started, PID {self.chrome_process.pid}, waiting for DevTools ...")
+            while True:
+                if self.chrome_process.poll() is not None:
+                    logger.error(f"Chrome process exited prematurely (code {self.chrome_process.returncode})")
+                    raise RuntimeError(f"Chrome exited with code {self.chrome_process.returncode}")
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{chrome_port}/json/version")
+                    logger.info("DevTools has been detected ready.")
+                    break
+                except:
+                    logger.info(f"DevTools is not ready yet. Waiting for DevTools ...")
+                    time.sleep(3)
+
+            self.options.debugger_address = f"127.0.0.1:{chrome_port}"
+            self.driver = webdriver.Chrome(options=self.options)
 
         self.wait = WebDriverWait(self.driver, 10)
+        logger.debug("ATrustLogin init successfully.")
 
     def open_portal(self):
         self.driver.get(self.portal_address)
@@ -411,6 +443,13 @@ class ATrustLogin:
 
     def close(self):
         self.driver.quit()
+        if hasattr(self, 'chrome_process') and self.chrome_process.poll() is None:
+            self.chrome_process.terminate()
+            try:
+                self.chrome_process.wait(timeout=5)
+            except:
+                self.chrome_process.kill()
+                self.chrome_process.wait()
 
     def __enter__(self):
         return self
