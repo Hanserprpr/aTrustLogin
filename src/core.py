@@ -356,7 +356,7 @@ class ATrustLogin:
     def handle_trust_terminal(self):
         try:
             btn = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'footer-btn') and contains(., '立即绑定')]"))
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'footer-btn') and (contains(., '立即绑定') or contains(., 'Bind Now'))]"))
             )
         except Exception:
             logger.debug("未检测到授信终端绑定按钮")
@@ -411,7 +411,7 @@ class ATrustLogin:
             try:
                 submit = WebDriverWait(self.driver, 3).until(
                     EC.element_to_be_clickable((By.XPATH,
-                        "//button[@type='submit' and contains(@class, 'ix-button-primary') and contains(., '确定')]"))
+                        "//button[@type='submit' and contains(@class, 'ix-button-primary') and (contains(., '确定') or contains(., 'OK'))]"))
                 )
                 self.scroll_and_click(submit)
             except Exception:
@@ -426,7 +426,7 @@ class ATrustLogin:
     def _click_resend_sms(self):
         try:
             resend_btn = self.driver.find_element(By.XPATH,
-                "//button[contains(@class, 'ix-button-link') and contains(., '重新获取')]")
+                "//button[contains(@class, 'ix-button-link') and (contains(., '重新获取') or contains(., 'Send Again'))]")
         except Exception:
             logger.warning("未找到重新获取按钮")
             return
