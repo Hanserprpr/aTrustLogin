@@ -3,6 +3,7 @@ import os.path
 import pickle
 import platform
 import re
+import json
 import socket
 import subprocess
 import time
@@ -267,7 +268,9 @@ class ATrustLogin:
                         self.driver.delete_cookie(cookie['name'])
                         self.driver.add_cookie(cookie)
                     for key, value in data.local_storage.items():
-                        self.driver.execute_script(f"window.localStorage.setItem('{key}', '{value}')")
+                        self.driver.execute_script(
+                            f"window.localStorage.setItem({json.dumps(key)}, {json.dumps(value)})"
+                        )
                     logger.info("Loaded storage data")
         except FileNotFoundError:
             logger.info("未找到存储的数据")
@@ -396,7 +399,7 @@ class ATrustLogin:
             exit(1)
 
         self.scroll_and_click(btn)
-        logger.info("已点击'立即绑定'按钮，等待跳转至验证码页面 ...")
+        logger.info("等待跳转至验证码页面 ...")
         self.delay_loading()
         self.delay_loading()
         return True
@@ -421,7 +424,7 @@ class ATrustLogin:
         sms_input = self.driver.find_element(By.CLASS_NAME, "ix-input-inner")
 
         while True:
-            code = input(f"\n请输入短信验证码 (或输入 'r' 重新发送): ").strip()
+            code = input(f"请输入短信验证码 (或输入 'r' 重新发送): ").strip()
 
             if code.lower() == 'r':
                 self._click_resend_sms()
