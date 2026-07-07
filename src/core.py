@@ -3,7 +3,6 @@ import os.path
 import pickle
 import platform
 import re
-import json
 import socket
 import subprocess
 import time
@@ -20,28 +19,50 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
-def prompt_if_missing(value, name, secure=False):
-    if value is not None and value != "":
+def prompt_if_missing(value, name, interactive=True, default=None, required=False, secure=False):
+    if value is not None:
         return value
-    prompt = f"请输入 {name}: "
-    if secure:
-        return getpass.getpass(prompt).strip()
-    else:
-        return input(prompt).strip()
+
+    if interactive:
+        if default:
+            prompt = f"请输入 {name} (可选): "
+        else:
+            prompt = f"请输入 {name}: "
+        if secure:
+            result = getpass.getpass(prompt).strip()
+        else:
+            result = input(prompt).strip()
+        if not result:
+            if default is not None:
+                return default
+            if required:
+                logger.error(f"缺少必要参数: {name}")
+                exit(1)
+        return result
+
+    if default is not None:
+        return default
+    if required:
+        logger.error(f"缺少必要参数: {name}")
+        exit(1)
+    return ""
 
 
-def prompt_params(args: dict, required_fields: list, optional_fields: list = None) -> dict:
-    if ("interactive" in args and not args["interactive"]) or not args.get("interactive", True):
-        return args
-    for field in required_fields:
-        if field not in args or args[field] is None or args[field] == "":
-            secure = "password" in field or "totp" in field
-            args[field] = prompt_if_missing(args.get(field), field, secure=secure)
-    if optional_fields:
-        for field, prompt_name, secure in optional_fields:
-            if field not in args or args[field] is None or args[field] == "":
-                args[field] = prompt_if_missing(args.get(field), prompt_name, secure=secure)
-    return args
+def load_credentials(data_dir):
+    path = os.path.join(data_dir, "ATrustLoginCredential.pkl")
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_credentials(data_dir, creds):
+    path = os.path.join(data_dir, "ATrustLoginCredential.pkl")
+    with open(path, "wb") as f:
+        pickle.dump(creds, f)
 
 
 class ATrustLoginStorage(BaseModel):
@@ -50,9 +71,8 @@ class ATrustLoginStorage(BaseModel):
 
 
 class ATrustLogin:
-    def __init__(self, portal_address, driver_path=None, browser_path=None, driver_type=None, data_dir="data", cookie_tid=None, cookie_sig=None, interactive=False):
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir, exist_ok=True)
+    def __init__(self, portal_address, driver_path=None, browser_path=None, driver_type=None, 
+                 data_dir="data", cookie_tid=None, cookie_sig=None, interactive=False):
         self.data_dir = data_dir
         self.interactive = interactive
         self.portal_address = portal_address
@@ -168,7 +188,7 @@ class ATrustLogin:
 
     @staticmethod
     def delay_loading():
-        time.sleep(5)
+        time.sleep(3)
 
     def find_input_fields(self, element, inputs_found=None):
         if inputs_found is None:
@@ -356,22 +376,24 @@ class ATrustLogin:
 
     def navigate_and_wait(self, url):
         self.driver.get(url)
-        self.delay_loading()
+        WebDriverWait(self.driver, 10).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
         self.delay_loading()
 
     def handle_trust_terminal(self):
         try:
-            btn = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'footer-btn') and (contains(., '立即绑定') or contains(., 'Bind Now'))]"))
-            )
+            btn = WebDriverWait(self.driver, 3).until(EC.element_to_be_clickable((By.XPATH, 
+                "//button[contains(@class, 'footer-btn') and (contains(., '立即绑定') or contains(., 'Bind Now'))]"
+            )))
         except Exception:
             logger.debug("未检测到授信终端绑定按钮")
             return False
 
-        answer = input("检测到授信终端绑定页面，是否绑定？(y/n): ").strip().lower()
-        if answer != 'y':
-            logger.info("用户跳过授信终端绑定")
-            return False
+        answer = input("检测到授信终端绑定页面，是否绑定？(default y/n): ").strip().lower()
+        if answer == 'n':
+            logger.info("已取消授信终端绑定，登入失败")
+            exit(1)
 
         self.scroll_and_click(btn)
         logger.info("已点击'立即绑定'按钮，等待跳转至验证码页面 ...")
@@ -381,7 +403,7 @@ class ATrustLogin:
 
     def handle_sms_auth(self):
         try:
-            WebDriverWait(self.driver, 5).until(
+            WebDriverWait(self.driver, 3).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "second-auth-template--main"))
             )
         except Exception:
@@ -415,10 +437,9 @@ class ATrustLogin:
             self.delay_input()
 
             try:
-                submit = WebDriverWait(self.driver, 3).until(
-                    EC.element_to_be_clickable((By.XPATH,
-                        "//button[@type='submit' and contains(@class, 'ix-button-primary') and (contains(., '确定') or contains(., 'OK'))]"))
-                )
+                submit = WebDriverWait(self.driver, 3).until(EC.element_to_be_clickable((By.XPATH,
+                    "//button[@type='submit' and contains(@class, 'ix-button-primary') and (contains(., '确定') or contains(., 'OK'))]"
+                )))
                 self.scroll_and_click(submit)
             except Exception:
                 logger.warning("未找到提交按钮，请手动操作")

@@ -63,8 +63,7 @@ class SDUCAS:
         self._device_cookie: str = ""
         self._lt: str = ""
 
-    def get_ticket_url(self, service_url: str, username: str, password: str,
-                       interactive: bool = True) -> str:
+    def get_ticket_url(self, service_url: str, username: str, password: str, interactive: bool = True) -> str:
         cas_login_url = self.CAS_BASE + "/login?" + urlencode({"service": service_url})
         device_url = self.CAS_BASE + "/device"
 
@@ -88,8 +87,7 @@ class SDUCAS:
         self._cookie_adx = resp.cookies.get("cookie-adx", "")
         logger.debug(f"提取到 lt={self._lt[:20]}..., JSESSIONID={self._jsessionid[:10]}...")
 
-    def _step2_device_verify(self, device_url: str, username: str, password: str,
-                             interactive: bool) -> None:
+    def _step2_device_verify(self, device_url: str, username: str, password: str, interactive: bool) -> None:
         logger.info("执行设备验证 ...")
 
         resp = self.session.post(device_url, data={
@@ -118,16 +116,13 @@ class SDUCAS:
         if info == "bind":
             if not interactive:
                 raise CasException("需要设备二次验证，但交互模式已禁用")
-            self._device_cookie = self._handle_device_binding(
-                device_url, username, password
-            )
+            self._device_cookie = self._handle_device_binding(device_url, username)
         else:
             raise CasException(f"未知设备验证结果: {info}")
 
-    def _handle_device_binding(self, device_url: str, username: str,
-                               password: str) -> str:
-        answer = input("需要设备二次验证，是否继续？(y/n): ").strip().lower()
-        if answer != "y":
+    def _handle_device_binding(self, device_url: str, username: str) -> str:
+        answer = input("需要设备二次验证，是否继续？(default y/n): ").strip().lower()
+        if answer == "n":
             raise CasException("用户取消设备二次验证")
 
         logger.info("向绑定的手机号发送验证码 ...")
@@ -172,8 +167,7 @@ class SDUCAS:
 
         return resp.cookies.get("device", "")
 
-    def _step3_submit_login(self, cas_login_url: str, username: str,
-                            password: str) -> str:
+    def _step3_submit_login(self, cas_login_url: str, username: str, password: str) -> str:
         logger.info("提交 CAS 统一认证 ...")
 
         rsa_value = str_enc(username + password + self._lt)
