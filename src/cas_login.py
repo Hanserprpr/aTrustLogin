@@ -69,6 +69,8 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
 
     at.navigate_and_wait(portal_addr)
     at.load_storage()
+    at.driver.refresh()
+    at.delay_loading()
 
     if at.is_logged():
         logger.info("Previous session still valid, skipping CAS")
