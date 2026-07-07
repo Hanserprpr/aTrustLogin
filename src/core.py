@@ -106,6 +106,8 @@ class ATrustLogin:
             self.options.add_argument("--lang=zh-CN")
             self.options.add_argument("--disable-gpu")
             self.options.add_argument("--disable-extensions")
+            self.options.add_argument("--disable-web-security")
+            self.options.add_argument("--allow-insecure-localhost")
             self.options.add_argument("--window-size=896,672")
 
             if browser_path is not None:
