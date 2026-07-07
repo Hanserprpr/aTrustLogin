@@ -21,8 +21,11 @@ while true; do
   if [ $? -eq 0 ]; then
       echo "[Program Exit] Autologin Command executed successfully."
       break
+  elif [ $? -eq 1 ]; then
+      echo "[Program Exit] Autologin Command executed unsuccessfully."
+      break
   else
-      echo "[Error Restart] Autologin Command crashed. Restarting..."
+      echo "[Program Restart] Autologin Command crashed. Restarting..."
       sleep 3  # 添加一个短暂的等待时间，以避免立即重试，增加稳定性
   fi
 done

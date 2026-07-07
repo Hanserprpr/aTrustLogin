@@ -43,60 +43,39 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
                      browser_path=browser_path, interactive=interactive)
 
     def _do_cas_login():
-        logger.info("通过 CAS 获取 ticket ...")
-        ticket_url = cas_client.get_ticket_url(
-            service_url=cas_service,
-            username=username,
-            password=password,
-            interactive=interactive,
-        )
-        logger.info("导航到 ticket URL ...")
-        at.navigate_and_wait(ticket_url)
-        at.load_storage()
+        logger.debug("通过 CAS 获取 ticket ...")
+        ticket_url = cas_client.get_ticket_url(cas_service, username, password, interactive)
 
-        if at.handle_trust_terminal():
+        logger.debug("导航到 ticket URL ...")
+        at.navigate_and_wait(ticket_url)
+
+        logged = at.is_logged()
+        if not logged and at.handle_trust_terminal():
             at.handle_sms_auth()
 
         logged = at.is_logged()
         url_snippet = str(at.driver.current_url)[:80] if at.driver.current_url else "about:blank"
-        logger.info(f"CAS 登录流程完成, logged={logged}, url={url_snippet}")
-
-        if logged:
-            at.update_storage()
-            logger.info("登录成功，会话数据已保存")
-        else:
-            logger.warning("登录后状态未确认，将在下次循环中重试")
-
-    at.navigate_and_wait(portal_addr)
-    at.load_storage()
-    at.driver.refresh()
-    at.delay_loading()
-
-    if at.is_logged():
-        logger.info("Previous session still valid, skipping CAS")
-    else:
-        logger.info("authenticating via CAS ... ")
-        _do_cas_login()
-
+        logger.debug(f"CAS 登录流程完成, logged={logged}, url={url_snippet}")
+        return logged
+    
+    tolerance = 3
     while True:
         try:
             logged = at.is_logged()
             if not logged:
-                url_snippet = str(at.driver.current_url)[:80]
-                logger.info(f"Session lost, re-authenticating via CAS ... (url={url_snippet})")
-                _do_cas_login()
-                
-                logged = at.is_logged()
+                logger.info("Login status is invalid, authenticating via CAS ...")
+                logged = _do_cas_login()
+
                 if not logged:
                     current_url = str(at.driver.current_url)[:100]
-                    logger.warning(f"re-authenticating failed, current_url={current_url}")
+                    logger.warning(f"Authenticating failed, current_url={current_url}")
                     at.delay_loading()
                     continue
                 else:
-                    logger.debug("re-authenticating success.")
+                    logger.info("Authenticating success.")
+                    tolerance = 3
 
-            current_url = str(at.driver.current_url)[:80]
-            logger.info(f"Session active, url={current_url}")
+            logger.info(f"Session active.")
 
             if keepalive <= 0:
                 logger.info("Keepalive disabled, idling ...")
@@ -105,10 +84,17 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
 
             time.sleep(keepalive)
             at.navigate_and_wait(portal_addr)
+        
         except CasException as e:
             logger.error(f"CAS 登录错误: {e}")
-            break
+            tolerance -= 1
+            if tolerance == 0:
+                exit(1)
+            at.delay_loading()
         except Exception as e:
             logger.error("An error occurred, retrying ...")
             logger.exception(e)
+            tolerance -= 1
+            if tolerance == 0:
+                exit(1)
             at.delay_loading()

@@ -266,8 +266,8 @@ class ATrustLogin:
             if os.path.exists(os.path.join(self.data_dir, "ATrustLoginStorage.pkl")):
                 with open(os.path.join(self.data_dir, "ATrustLoginStorage.pkl"), "rb") as f:
                     data = pickle.load(f)
+                    self.driver.delete_all_cookies()
                     for cookie in data.cookies:
-                        self.driver.delete_cookie(cookie['name'])
                         self.driver.add_cookie(cookie)
                     for key, value in data.local_storage.items():
                         self.driver.execute_script(
@@ -377,7 +377,8 @@ class ATrustLogin:
         if any(keyword in url.fragment for keyword in self.must_not_logged_keywords):
             return False
 
-        return "工作台" in self.driver.page_source and "本地密码" not in self.driver.page_source
+        page = self.driver.page_source
+        return "自动化工作台" in page and "本地密码" not in page and "Unknown error500" not in page
 
     def navigate_and_wait(self, url):
         self.driver.get(url)
@@ -398,7 +399,7 @@ class ATrustLogin:
         answer = input("检测到授信终端绑定页面，是否绑定？(default y/n): ").strip().lower()
         if answer == 'n':
             logger.info("已取消授信终端绑定，登入失败")
-            exit(1)
+            exit(0)
 
         self.scroll_and_click(btn)
         logger.info("等待跳转至验证码页面 ...")
