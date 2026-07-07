@@ -73,6 +73,7 @@ class SDUCAS:
 
     def _step1_get_login_page(self, url: str) -> None:
         logger.info("访问 CAS 登录页面 ...")
+        self.session.cookies.clear()
         resp = self.session.get(url, allow_redirects=False)
         resp.raise_for_status()
 
