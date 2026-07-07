@@ -115,6 +115,8 @@ class ATrustLogin:
                     "--lang=zh-CN", 
                     "--disable-gpu", 
                     "--disable-extensions",
+                    "--disable-web-security",
+                    "--allow-insecure-localhost",
                     "--window-size=896,672",
                     "data:,"
                 ], stdout=open(log_file, "w"), stderr=subprocess.STDOUT
