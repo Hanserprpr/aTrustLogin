@@ -30,6 +30,10 @@ class DeviceFingerprint:
     details: str = "aTrustLogin-py-v1"
     browsers: str = "aTrustLogin-py-browser"
 
+    def __init__(self, fingerprint):
+        self.details = fingerprint + "-py-v1"
+        self.browsers = fingerprint + "-py-browser"
+
     @property
     def details_md5(self) -> str:
         return str_enc(hashlib.md5(self.details.encode()).hexdigest())

@@ -26,7 +26,7 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
 
     username = prompt_if_missing(username, "统一认证学号", interactive=interactive, required=True)
     password = prompt_if_missing(password, "统一认证密码", interactive=interactive, required=True, secure=True)
-    fingerprint = prompt_if_missing(fingerprint, "设备指纹", interactive=interactive, default="aTrustLogin-py-v1")
+    fingerprint = prompt_if_missing(fingerprint, "设备指纹", interactive=interactive, default="aTrustLogin")
 
     save_credentials(data_dir, {
         "username": username,
@@ -34,7 +34,7 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
         "fingerprint": fingerprint,
     })
 
-    fps = DeviceFingerprint(details=fingerprint)
+    fps = DeviceFingerprint(fingerprint)
     cas_client = SDUCAS(fingerprint=fps)
 
     logger.debug("Opening Web Browser...")
