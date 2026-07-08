@@ -4,6 +4,7 @@ import pickle
 import platform
 import re
 import json
+import shutil
 import socket
 import subprocess
 import time
@@ -75,6 +76,7 @@ class ATrustLoginStorage(BaseModel):
 class ATrustLogin:
     def __init__(self, portal_address, driver_path=None, browser_path=None, driver_type=None, 
                  data_dir="data", cookie_tid=None, cookie_sig=None, interactive=False):
+        self.closed = False
         self.data_dir = data_dir
         self.interactive = interactive
         self.portal_address = portal_address
@@ -99,7 +101,8 @@ class ATrustLogin:
             from selenium.webdriver.edge.service import Service
 
             self.options = Options()
-            self.options.add_argument("--user-data-dir=/tmp/edge-data")
+            self._edge_data_dir = "/tmp/edge-data"
+            self.options.add_argument(f"--user-data-dir={self._edge_data_dir}")
             self.options.add_argument('--profile-directory=ATrustLogin')
             self.options.add_argument("--ignore-certificate-errors")
             self.options.add_argument("--ignore-ssl-errors")
@@ -123,15 +126,15 @@ class ATrustLogin:
             PROFILE_DIR = "Default"
 
             binary_location = browser_path or "/usr/bin/chromium"
-            chrome_data_dir = os.path.join("/tmp", "chrome-data")
-            log_file = os.path.join(chrome_data_dir, "chrome.log")
-            os.makedirs(chrome_data_dir, exist_ok=True)
+            self._chrome_data_dir = os.path.join("/tmp", "chrome-data")
+            log_file = os.path.join(self._chrome_data_dir, "chrome.log")
+            os.makedirs(self._chrome_data_dir, exist_ok=True)
 
             logger.info(f"Starting Chrome with debug port {DEBUG_PORT}")
             self.chrome_process = subprocess.Popen([
                     binary_location,
                     f"--remote-debugging-port={DEBUG_PORT}",
-                    f"--user-data-dir={chrome_data_dir}",
+                    f"--user-data-dir={self._chrome_data_dir}",
                     f"--profile-directory={PROFILE_DIR}",
                     "--ignore-certificate-errors",
                     "--ignore-ssl-errors", 
@@ -368,10 +371,21 @@ class ATrustLogin:
             self.update_storage()
             return True
 
+    def need_sms_bind(self):
+        if self.driver.current_url.startswith('about:'):
+            return None
+        url = urlparse(self.driver.current_url)
+        return "page_auth_trust_terminal" in url.fragment
+    
+    def is_in_sms_page(self):
+        if self.driver.current_url.startswith('about:'):
+            return None
+        url = urlparse(self.driver.current_url)
+        return "smsAuth" in url.fragment
+
     def is_logged(self):
         if self.driver.current_url.startswith('about:'):
             return None
-        
         url = urlparse(self.driver.current_url)
         return any(keyword in url.fragment for keyword in self.must_be_logged_keywords)
 
@@ -388,33 +402,28 @@ class ATrustLogin:
         self.delay_loading()
 
     def handle_trust_terminal(self):
-        try:
-            btn = WebDriverWait(self.driver, 3).until(EC.element_to_be_clickable((By.XPATH, 
-                "//button[contains(@class, 'footer-btn') and (contains(., '立即绑定') or contains(., 'Bind Now'))]"
-            )))
-        except Exception:
-            logger.debug("未检测到授信终端绑定按钮")
-            return False
-
         answer = input("检测到授信终端绑定页面，是否绑定？(default y/n): ").strip().lower()
         if answer == 'n':
             logger.info("已取消授信终端绑定，登入失败")
             exit(1)
 
+        btn = WebDriverWait(self.driver, 3).until(EC.element_to_be_clickable((By.XPATH, 
+            "//button[contains(@class, 'footer-btn') and (contains(., '立即绑定') or contains(., 'Bind Now'))]"
+        )))
+
         self.scroll_and_click(btn)
         logger.info("等待跳转至验证码页面 ...")
-        self.delay_loading()
-        self.delay_loading()
-        return True
+        for _ in range(3):
+            logger.debug("Detecting sms page ...")
+            if self.is_in_sms_page():
+                self.handle_sms_auth()
+                break
+            self.delay_loading()
 
     def handle_sms_auth(self):
-        try:
-            WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "second-auth-template--main"))
-            )
-        except Exception:
-            logger.debug("未检测到短信验证码页面")
-            return
+        WebDriverWait(self.driver, 3).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "second-auth-template--main"))
+        )
 
         hint_text = ""
         try:
@@ -452,14 +461,12 @@ class ATrustLogin:
                 self.require_interact()
 
             logger.info("已提交短信验证码")
-            self.delay_loading()
-            self.delay_loading()
             break
 
     def _click_resend_sms(self):
         try:
             resend_btn = self.driver.find_element(By.XPATH,
-                "//button[contains(@class, 'ix-button-link') and (contains(., '重新获取') or contains(., 'Send Again'))]")
+                "//button[contains(@class, 'ix-button-link') and (contains(., '重新获取') or contains(., 'Send'))]")
         except Exception:
             logger.warning("未找到重新获取按钮")
             return
@@ -474,19 +481,6 @@ class ATrustLogin:
             logger.info(f"重新获取按钮仍在倒计时 ({remaining}秒)，请稍后再试")
             self.delay_input()
 
-    def close(self):
-        self.driver.quit()
-        if hasattr(self, 'chrome_process') and self.chrome_process.poll() is None:
-            self.chrome_process.terminate()
-            try:
-                self.chrome_process.wait(timeout=5)
-            except:
-                self.chrome_process.kill()
-                self.chrome_process.wait()
-
-    def __enter__(self):
-        return self
-
     def update_storage(self):
         data = ATrustLoginStorage(
             cookies=self.driver.get_cookies(),
@@ -494,6 +488,37 @@ class ATrustLogin:
         )
         with open(os.path.join(self.data_dir, "ATrustLoginStorage.pkl"), "wb") as f:
             pickle.dump(data, f)
+
+    def close(self):
+        if self.closed:
+            return
+
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+
+        if hasattr(self, 'chrome_process') and self.chrome_process.poll() is None:
+            try:
+                self.chrome_process.terminate()
+                self.chrome_process.wait(timeout=5)
+            except Exception:
+                try:
+                    self.chrome_process.kill()
+                    self.chrome_process.wait()
+                except Exception:
+                    pass
+
+        for attr in ('_chrome_data_dir', '_edge_data_dir'):
+            if hasattr(self, attr):
+                data_dir = getattr(self, attr)
+                if data_dir and os.path.exists(data_dir):
+                    shutil.rmtree(data_dir, ignore_errors=True)
+        
+        self.closed = True
+
+    def __enter__(self):
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()

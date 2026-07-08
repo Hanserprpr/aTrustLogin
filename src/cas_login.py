@@ -2,10 +2,15 @@
 CAS (Central Authentication Service) login flow for SDU aTrust VPN.
 Uses HTTP-based CAS authentication to obtain a ticket,
 then Selenium to complete the browser-side login.
+
+After login, browser is closed and session is kept alive via lightweight HTTP checks.
 """
 
+import os
+import pickle
 import time
 
+import requests
 from loguru import logger
 
 from core import ATrustLogin, prompt_if_missing, load_credentials, save_credentials
@@ -13,6 +18,91 @@ from sdu_cas import SDUCAS, DeviceFingerprint, CasException
 
 portal_addr = "https://vpn.sdu.edu.cn"
 cas_service = "https://vpn.sdu.edu.cn:443/passport/v1/auth/cas"
+online_url = "https://vpn.sdu.edu.cn/passport/v1/user/onlineInfo?clientType=SDPBrowserClient"
+
+
+def _check_session(data_dir: str) -> bool:
+    """HTTP GET to onlineInfo API — lightweight session check without browser."""
+    path = os.path.join(data_dir, "ATrustLoginStorage.pkl")
+    if not os.path.exists(path):
+        return False
+
+    try:
+        with open(path, "rb") as f:
+            storage = pickle.load(f)
+        cookie_str = "; ".join(
+            f"{c['name']}={c['value']}" for c in storage.cookies
+            if any(domain in (c.get("domain") or "") for domain in [".sdu.edu.cn", "vpn.sdu.edu.cn"])
+        )
+        if not cookie_str:
+            return False
+
+        resp = requests.get(online_url, headers={"Cookie": cookie_str}, timeout=15)
+        return resp.json().get("code") == 0
+    except Exception:
+        return False
+
+
+def _login_browser(data_dir: str, portal_addr: str,
+                   driver_type: str, driver_path: str, browser_path: str,
+                   interactive: bool,
+                   cas_client: SDUCAS, username: str, password: str) -> bool:
+    """
+    1. Open browser
+    2. Try stored cookies → if valid, save & return
+    3. CAS login flow → if success, update storage & return
+    4. Close browser in all cases
+    """
+    at = None
+    try:
+        at = ATrustLogin(data_dir=data_dir, portal_address=portal_addr,
+                         driver_type=driver_type, driver_path=driver_path,
+                         browser_path=browser_path, interactive=interactive)
+
+        logger.info("Authenticating via CAS ...")
+        ticket_url = cas_client.get_ticket_url(cas_service, username, password, interactive)
+        
+        logger.debug("Navigating to ticket URL ...")
+        at.navigate_and_wait(ticket_url)
+        
+        logged = False
+        for _ in range(5):
+            logger.debug("Detecting logged ...")
+            logged = at.is_logged()
+            if logged:
+                break
+            
+            logger.debug("Detecting sms needed ...")
+            if at.need_sms_bind():
+                at.handle_trust_terminal()
+                for _ in range(5):
+                    at.delay_loading()
+                    logger.debug("Detecting logged ...")
+                    logged = at.is_logged()
+                    if logged:
+                        break
+                break
+
+            at.delay_loading()
+
+        if logged:
+            at.update_storage()
+            logger.debug("Login success, cookies saved")
+        else:
+            logger.debug(f"Login completed but session not confirmed")
+        return logged
+
+    except (CasException, Exception) as e:
+        logger.error(f"Browser login failed: {e}")
+        return False
+    finally:
+        if at:
+            try:
+                url_snippet = str(at.driver.current_url)[:80] if at.driver.current_url else "about:blank"
+                logger.debug(f"Browser remain at {url_snippet}")
+                at.close()
+            except Exception:
+                pass
 
 
 def run(username=None, password=None, keepalive=200, data_dir="./data",
@@ -37,64 +127,45 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
     fps = DeviceFingerprint(fingerprint)
     cas_client = SDUCAS(fingerprint=fps)
 
-    logger.debug("Opening Web Browser...")
-    at = ATrustLogin(data_dir=data_dir, portal_address=portal_addr,
-                     driver_type=driver_type, driver_path=driver_path,
-                     browser_path=browser_path, interactive=interactive)
+    if not _login_browser(data_dir, portal_addr,
+                          driver_type, driver_path, browser_path,
+                          interactive, cas_client, username, password):
+        logger.error("Initial login failed, exiting")
+        exit(1)
 
-    def _do_cas_login():
-        logger.debug("通过 CAS 获取 ticket ...")
-        ticket_url = cas_client.get_ticket_url(cas_service, username, password, interactive)
+    logger.info("Login success!")
 
-        logger.debug("导航到 ticket URL ...")
-        at.navigate_and_wait(ticket_url)
-
-        logged = at.is_logged()
-        if not logged and at.handle_trust_terminal():
-            at.handle_sms_auth()
-
-        logged = at.is_logged()
-        url_snippet = str(at.driver.current_url)[:80] if at.driver.current_url else "about:blank"
-        logger.debug(f"CAS 登录流程完成, logged={logged}, url={url_snippet}")
-        return logged
-    
     tolerance = 3
     while True:
         try:
-            logged = at.is_logged()
-            if not logged:
-                logger.info("Login status is invalid, authenticating via CAS ...")
-                logged = _do_cas_login()
-
-                if not logged:
-                    current_url = str(at.driver.current_url)[:100]
-                    logger.warning(f"Authenticating failed, current_url={current_url}")
-                    at.delay_loading()
-                    continue
-                else:
-                    logger.info("Authenticating success.")
-                    tolerance = 3
-
-            logger.info(f"Session active.")
-
             if keepalive <= 0:
                 logger.info("Keepalive disabled, idling ...")
                 while True:
                     time.sleep(86400)
 
             time.sleep(keepalive)
-            at.navigate_and_wait(portal_addr)
-        
-        except CasException as e:
-            logger.error(f"CAS 登录错误: {e}")
-            tolerance -= 1
-            if tolerance == 0:
-                exit(1)
-            at.delay_loading()
+
+            if not _check_session(data_dir):
+                logger.info("Session expired, re-authenticating via browser ...")
+                for i in range(3):
+                    ok = _login_browser(data_dir, portal_addr,
+                                        driver_type, driver_path, browser_path,
+                                        interactive, cas_client, username, password)
+                    if ok:
+                        logger.info("Session re-authenticated successfully")
+                        tolerance = 3
+                    else:
+                        if i == 2:
+                            logger.error("Re-authentication failed after 3 attempts, exiting")
+                            exit(1)
+                        logger.warning(f"Re-authentication failed, {2 - i} retries left")
+            else:
+                logger.debug("Session is active.")
+
         except Exception as e:
-            logger.error("An error occurred, retrying ...")
-            logger.exception(e)
+            logger.error(f"Keepalive error: {e}")
             tolerance -= 1
-            if tolerance == 0:
+            if tolerance <= 0:
+                logger.error("Too many errors, exiting")
                 exit(1)
-            at.delay_loading()
+            time.sleep(30)
