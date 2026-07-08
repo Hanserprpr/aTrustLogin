@@ -82,7 +82,7 @@ class ATrustLogin:
         self.cookie_sig = cookie_sig
 
         self.must_be_logged_keywords = ['app_center', 'user_info', 'app_apply', 'device_manage']
-        self.must_not_logged_keywords = ['login', 'totpAuth', 'captcha']
+        self.must_not_logged_keywords = ['login', 'totpAuth', 'captcha', 'page_auth_trust_terminal', 'smsAuth']
 
         if driver_type is None:
             system = platform.system()
