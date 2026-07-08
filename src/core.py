@@ -83,7 +83,7 @@ class ATrustLogin:
         self.cookie_sig = cookie_sig
 
         self.must_be_logged_keywords = ['app_center', 'user_info', 'app_apply', 'device_manage']
-        self.must_not_logged_keywords = ['login', 'totpAuth', 'captcha', 'page_auth_trust_terminal', 'smsAuth']
+        # self.must_not_logged_keywords = ['login', 'totpAuth', 'captcha', 'page_auth_trust_terminal', 'smsAuth']
 
         if driver_type is None:
             system = platform.system()
@@ -371,16 +371,9 @@ class ATrustLogin:
     def is_logged(self):
         if self.driver.current_url.startswith('about:'):
             return None
-
+        
         url = urlparse(self.driver.current_url)
-
-        if any(keyword in url.fragment for keyword in self.must_be_logged_keywords):
-            return True
-        if any(keyword in url.fragment for keyword in self.must_not_logged_keywords):
-            return False
-
-        page = self.driver.page_source
-        return "自动化工作台" in page and "本地密码" not in page and "Unknown error500" not in page
+        return any(keyword in url.fragment for keyword in self.must_be_logged_keywords)
 
     def navigate_and_wait(self, url):
         try:
