@@ -399,7 +399,7 @@ class ATrustLogin:
         answer = input("检测到授信终端绑定页面，是否绑定？(default y/n): ").strip().lower()
         if answer == 'n':
             logger.info("已取消授信终端绑定，登入失败")
-            exit(0)
+            exit(1)
 
         self.scroll_and_click(btn)
         logger.info("等待跳转至验证码页面 ...")

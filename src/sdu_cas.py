@@ -147,7 +147,8 @@ class SDUCAS:
     def _handle_device_binding(self, device_url: str, username: str) -> None:
         answer = input("需要设备二次验证，是否继续？(y/n, default y): ").strip().lower()
         if answer == "n":
-            raise CasException("用户取消设备二次验证")
+            logger.warn("已取消设备二次验证，登入失败")
+            exit(1)
 
         last_send_time: float = 0
 
