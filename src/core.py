@@ -15,6 +15,7 @@ import pyotp
 from loguru import logger
 from pydantic import BaseModel
 from selenium import webdriver
+from selenium.common import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -161,6 +162,7 @@ class ATrustLogin:
             self.driver = webdriver.Chrome(options=self.options)
 
         self.wait = WebDriverWait(self.driver, 10)
+        self.driver.set_page_load_timeout(30)
         logger.debug("Selenium init successfully.")
 
     def open_portal(self):
@@ -381,7 +383,12 @@ class ATrustLogin:
         return "自动化工作台" in page and "本地密码" not in page and "Unknown error500" not in page
 
     def navigate_and_wait(self, url):
-        self.driver.get(url)
+        try:
+            self.driver.get(url)
+        except TimeoutException:
+            logger.warning(f"页面加载超时，强制停止: {url}")
+            self.driver.execute_script("window.stop()")
+            raise
         WebDriverWait(self.driver, 10).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
