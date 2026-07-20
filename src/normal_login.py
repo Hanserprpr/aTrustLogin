@@ -7,7 +7,7 @@ import time
 
 from loguru import logger
 
-from core import ATrustLogin, prompt_if_missing, load_credentials, save_credentials
+from core import ATrustLogin, prompt_if_missing, load_credentials, save_credentials, set_vpn_ready
 
 
 def run(portal_address=None, username=None, password=None, totp_key=None,
@@ -15,6 +15,7 @@ def run(portal_address=None, username=None, password=None, totp_key=None,
         data_dir="./data", driver_type=None, driver_path=None,
         browser_path=None, interactive=True, wait_atrust=False):
 
+    set_vpn_ready(False)
     saved = load_credentials(data_dir)
     portal_address = portal_address if portal_address is not None else saved.get("portal_address")
     username = username if username is not None else saved.get("username")
@@ -54,12 +55,16 @@ def run(portal_address=None, username=None, password=None, totp_key=None,
     while True:
         try:
             if not at.is_logged():
+                set_vpn_ready(False)
                 logger.info("Session lost. Trying to login again ...")
                 at.open_portal()
                 at.delay_loading()
                 if at.login(username=username, password=password, totp_key=totp_key) is True:
+                    set_vpn_ready(True)
                     at.delay_loading()
                     at.delay_loading()
+            else:
+                set_vpn_ready(True)
 
             if keepalive <= 0:
                 logger.info("Keepalive disabled, idling ...")

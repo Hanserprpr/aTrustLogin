@@ -17,6 +17,8 @@ ARG VPN_DEB_PATH
 # 重新定义 ENV 变量，以确保环境变量在最终镜像中可用
 ENV PING_INTERVAL=1800
 
+EXPOSE 1081
+
 # 保留基础镜像的卷（这会继承 `/root` 和 `/usr/share/sangfor/EasyConnect/resources/logs/` 的设置）
 VOLUME ["/root", "/usr/share/sangfor/EasyConnect/resources/logs/"]
 
@@ -31,8 +33,9 @@ RUN echo "Begin build" && \
     chmod +x /bin/start-with-autologin-actual.sh && \
     chmod +x /bin/start-port-forwarding.sh && \
     chmod +x /bin/start-ssh.sh && \
+    chmod +x /bin/start-ssh-proxy.sh && \
     apt-get update && \
-    apt-get install -y --no-install-recommends --no-install-suggests apt-utils curl x11-xserver-utils openssh-server && \
+    apt-get install -y --no-install-recommends --no-install-suggests apt-utils curl x11-xserver-utils openssh-server sshpass && \
     apt-get install -y --no-install-recommends --no-install-suggests chromium chromium-driver chromium-l10n python3 python3-pip && \
     cd /opt/atrust-autologin && \
     pip3 install --break-system-packages -r requirements.txt && \

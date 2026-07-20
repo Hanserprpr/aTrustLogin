@@ -22,6 +22,21 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
+ATRUST_READY_FILE = os.environ.get("ATRUST_READY_FILE", "/tmp/atrust-login-ready")
+
+
+def set_vpn_ready(ready: bool) -> None:
+    """Publish VPN login state for companion processes such as the SSH proxy."""
+    try:
+        if ready:
+            with open(ATRUST_READY_FILE, "w", encoding="utf-8") as f:
+                f.write("ready\n")
+        elif os.path.exists(ATRUST_READY_FILE):
+            os.remove(ATRUST_READY_FILE)
+    except OSError as e:
+        logger.warning(f"Unable to update VPN ready state: {e}")
+
+
 def prompt_if_missing(value, name, interactive=True, default=None, required=False, secure=False):
     if value is not None:
         return value
@@ -121,6 +136,7 @@ class ATrustLogin:
             
         else:
             from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
 
             DEBUG_PORT = "12345"
             PROFILE_DIR = "Default"
@@ -162,7 +178,9 @@ class ATrustLogin:
 
             self.options = Options()
             self.options.debugger_address = f"127.0.0.1:{DEBUG_PORT}"
-            self.driver = webdriver.Chrome(options=self.options)
+            driver_executable = driver_path or shutil.which("chromedriver")
+            service = Service(executable_path=driver_executable) if driver_executable else Service()
+            self.driver = webdriver.Chrome(service=service, options=self.options)
 
         self.wait = WebDriverWait(self.driver, 10)
         self.driver.set_page_load_timeout(30)
@@ -482,9 +500,17 @@ class ATrustLogin:
             self.delay_input()
 
     def update_storage(self):
+        local_storage = {}
+        try:
+            local_storage = self.driver.execute_script(
+                "return Object.fromEntries(Object.entries(window.localStorage))"
+            ) or {}
+        except Exception as e:
+            logger.warning(f"Unable to read localStorage; saving cookies only: {e}")
+
         data = ATrustLoginStorage(
             cookies=self.driver.get_cookies(),
-            local_storage=self.driver.execute_script("return window.localStorage")
+            local_storage=local_storage,
         )
         with open(os.path.join(self.data_dir, "ATrustLoginStorage.pkl"), "wb") as f:
             pickle.dump(data, f)

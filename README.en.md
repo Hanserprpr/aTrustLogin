@@ -80,6 +80,40 @@ Set program parameters in the `ATRUST_OPTS` environment variable and run the Doc
 docker run -it --rm -e ATRUST_OPTS='--portal_address="your_portal" --username="your_username" --password="your_password"' kenvix/atrust-autologin:latest
 ```
 
+### SSH SOCKS5 proxy over aTrust
+
+Set `SSH_PROXY_HOST` and `SSH_PROXY_USER` to create an outbound SSH dynamic-forward proxy after aTrust authentication succeeds. The SSH server should be reachable through the aTrust network. Authentication can use a private key, password file, or password environment variable; a readable private key takes precedence.
+
+```shell
+docker run -it --rm \
+  --device /dev/net/tun --cap-add NET_ADMIN \
+  -e NODANTED=1 \
+  -e ATRUST_OPTS='--cas=True --username="student_id" --password="password"' \
+  -e SSH_PROXY_HOST='vpn-internal-ssh-host' \
+  -e SSH_PROXY_USER='ssh-user' \
+  -e SSH_PROXY_IDENTITY_FILE=/run/secrets/ssh_proxy_key \
+  -v "$HOME/.atrust-data:/root" \
+  -v "$HOME/.ssh/atrust_proxy:/run/secrets/ssh_proxy_key:ro" \
+  -p 127.0.0.1:1080:1081 \
+  atrust-login-sdu:latest
+```
+
+Use `socks5h://127.0.0.1:1080` in the browser or application. The proxy stops when the aTrust session is lost and reconnects automatically after authentication is restored. Optional settings include `SSH_PROXY_PORT` (default `22`), `SSH_PROXY_LOCAL_PORT` (default `1081`), `SSH_PROXY_KNOWN_HOSTS_FILE`, `SSH_PROXY_STRICT_HOST_KEY_CHECKING` (default `accept-new`), and `SSH_PROXY_RETRY_INTERVAL` (default `5`).
+
+The startup script protects the Docker gateway return route from more-specific routes installed by aTrust. After the SSH forward is listening, it prints a `READY` block with the SOCKS5 protocol, published address, port, URL, and browser DNS guidance. Override the displayed endpoint with `SSH_PROXY_PUBLISHED_HOST` and `SSH_PROXY_PUBLISHED_PORT` when the Docker publish mapping differs from `127.0.0.1:1080`.
+
+A credential-free runner template is available at [`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh). Copy it to the Git-ignored local runner, replace all `CHANGE_ME` values, and start it:
+
+```shell
+cp docker/run-sdu-ssh-proxy.example.sh docker/run-sdu-ssh-proxy.sh
+chmod 700 docker/run-sdu-ssh-proxy.sh
+./docker/run-sdu-ssh-proxy.sh
+```
+
+If the `atrust` container already exists, the runner reuses it. A running container is left untouched and its logs are followed; a stopped container receives the latest proxy and login code before being restarted in place, preserving its saved device identity.
+
+For password authentication, replace the private-key setting and mount with `SSH_PROXY_PASSWORD_FILE=/run/secrets/ssh_proxy_password` and a read-only password-file mount. `SSH_PROXY_PASSWORD` is also supported but is less secure because container administrators can inspect environment variables. It is distinct from `SSH_PASSWORD`, which configures inbound SSH access to the container.
+
 To avoid CAPTCHA during the first login:
 1. Log in via the aTrust webpage and input the CAPTCHA manually.
 2. Save `tid` and `tid.sig` cookies from your browser's developer tools.
@@ -106,4 +140,3 @@ FRP (Fast Reverse Proxy) is an intranet penetration tool. You can use FRP to map
 4. Use `run.sh` for future starts, not `docker start`.
 
 For further options and environment variables (e.g., `PING_ADDR`, `PING_INTERVAL`), refer to the [docker-easyconnect documentation](https://github.com/docker-easyconnect/docker-easyconnect/blob/master/doc/usage.md).
-

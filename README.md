@@ -95,6 +95,81 @@ cookie_sig 和 cookie_tid 可以不必设置，如果不设置，首次登录会
 
 默认带有每隔 `200` 秒的刷新登录保活机制，如果不需要此功能，可以在 `ATRUST_OPTS` 中添加 `--keepalive 0` 参数。也可以通过 `--keepalive` 参数设置保活时间，单位为秒。即 `docker run -it -e ATRUST_OPTS='--keepalive 0 ...其他参数' ...其他参数 kenvix/docker-atrust-autologin:latest`
 
+### 通过 aTrust 建立 SSH SOCKS5 二级代理
+
+容器可以在 aTrust 登录成功后连接一台 aTrust 网络内可达的 SSH 服务器，并向宿主机提供 SSH 动态转发产生的 SOCKS5 代理。访问链路为：
+
+```text
+应用 -> 宿主机 127.0.0.1:1080 -> 容器 SSH SOCKS5:1081
+     -> aTrust VPN -> SSH 服务器 -> 目标网站或服务
+```
+
+该功能支持 SSH 私钥或密码认证，优先使用可读的私钥。推荐将私钥权限设为仅当前用户可读，然后构建并启动容器：
+
+```shell
+chmod 600 "$HOME/.ssh/atrust_proxy"
+docker build -t atrust-login-sdu:latest .
+
+docker run -it --rm \
+  --name atrust-sdu \
+  --device /dev/net/tun \
+  --cap-add NET_ADMIN \
+  --sysctl net.ipv4.conf.default.route_localnet=1 \
+  --shm-size 256m \
+  -e URLWIN=1 \
+  -e PASSWORD='VNC密码' \
+  -e NODANTED=1 \
+  -e ATRUST_OPTS='--cas=True --username="学号" --password="统一认证密码" --fingerprint="固定设备名称" --keepalive=200' \
+  -e SSH_PROXY_HOST='SSH服务器的VPN内地址' \
+  -e SSH_PROXY_USER='SSH用户名' \
+  -e SSH_PROXY_PORT=22 \
+  -e SSH_PROXY_LOCAL_PORT=1081 \
+  -e SSH_PROXY_IDENTITY_FILE=/run/secrets/ssh_proxy_key \
+  -v "$HOME/.atrust-data:/root" \
+  -v "$HOME/.ssh/atrust_proxy:/run/secrets/ssh_proxy_key:ro" \
+  -p 127.0.0.1:5901:5901 \
+  -p 127.0.0.1:1080:1081 \
+  atrust-login-sdu:latest
+```
+
+浏览器或其他应用使用 `socks5h://127.0.0.1:1080`。`socks5h` 会让域名也由 SSH 服务器解析。`NODANTED=1` 会关闭基础镜像原有的直连 aTrust SOCKS5；宿主机的 `1080` 改为映射容器内的 SSH SOCKS5 `1081`。
+
+如需使用远程 SSH 密码，删除示例中的私钥环境变量和私钥挂载，改用只读密码文件：
+
+```shell
+-e SSH_PROXY_PASSWORD_FILE=/run/secrets/ssh_proxy_password \
+-v "$HOME/.ssh/atrust_proxy_password:/run/secrets/ssh_proxy_password:ro"
+```
+
+也可以直接设置 `-e SSH_PROXY_PASSWORD='远程SSH密码'`，但容器管理员可以读取环境变量，因此安全性低于只读密码文件。`SSH_PROXY_PASSWORD` 与用于登录容器自身的 `SSH_PASSWORD` 是两个不同变量。
+
+SSH 代理相关环境变量：
+
+- `SSH_PROXY_HOST`：SSH 服务器地址；不设置时禁用此功能。为了保证链路经过 aTrust，应使用只能通过 aTrust 到达的地址。
+- `SSH_PROXY_USER`：SSH 用户名，启用功能时必填。
+- `SSH_PROXY_PORT`：SSH 端口，默认 `22`。
+- `SSH_PROXY_LOCAL_PORT`：容器内 SOCKS5 监听端口，默认 `1081`。
+- `SSH_PROXY_IDENTITY_FILE`：容器内私钥路径，默认 `/root/.ssh/id_ed25519`。
+- `SSH_PROXY_PASSWORD_FILE`：容器内远程 SSH 密码文件路径；没有可读私钥时使用。
+- `SSH_PROXY_PASSWORD`：远程 SSH 密码；没有私钥和密码文件时使用，不推荐用于共享环境。
+- `SSH_PROXY_KNOWN_HOSTS_FILE`：主机密钥记录，默认 `/root/.ssh/known_hosts`。
+- `SSH_PROXY_STRICT_HOST_KEY_CHECKING`：默认 `accept-new`。生产环境建议预先写入 `known_hosts` 并设置为 `yes`。
+- `SSH_PROXY_RETRY_INTERVAL`：SSH 断开后的重试间隔，默认 `5` 秒。
+- `SSH_PROXY_PUBLISHED_HOST`：就绪日志中展示给用户的连接地址，默认 `127.0.0.1`。
+- `SSH_PROXY_PUBLISHED_PORT`：就绪日志中展示给用户的宿主机端口，默认 `1080`，应与 `-p` 左侧端口一致。
+
+SSH 隧道只会在程序确认 aTrust 已登录后启动；aTrust 会话失效时会停止，并在重新认证成功后自动建立。脚本会保护 Docker 网关的回程路由，防止 aTrust 下发的路由导致宿主机映射端口超时。代理建立后，控制台会输出 `READY`、SOCKS5 协议、连接地址、端口和完整代理 URL。SSH 服务端需要允许 TCP 转发（`AllowTcpForwarding yes`）。该代理主要转发 TCP，HTTP、HTTPS 和 WebSocket 均可使用，但不代理 UDP/QUIC。
+
+仓库提供了不含真实凭据的启动脚本 [`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh)。先复制为本地脚本，再修改其中的 `CHANGE_ME`：
+
+```shell
+cp docker/run-sdu-ssh-proxy.example.sh docker/run-sdu-ssh-proxy.sh
+chmod 700 docker/run-sdu-ssh-proxy.sh
+./docker/run-sdu-ssh-proxy.sh
+```
+
+`docker/run-sdu-ssh-proxy.sh` 已被 Git 忽略。如果 `atrust` 容器已存在，脚本会复用它：运行中的容器仅跟随日志，已停止的容器会热更新代理和登录代码后原地启动，不会删除已保存的设备身份。
+
 如果还需要发包保活功能，请添加 Docker `PING_ADDR` 和 `PING_INTERVAL` 环境变量，具体[参见此处](https://github.com/docker-easyconnect/docker-easyconnect/blob/master/doc/usage.md)。指定的服务器地址必须是 VPN 可到达的，例如 `docker run -it -e PING_ADDR=172.20.0.1 -e PING_INTERVAL=200 ...其他参数`。
 
 `--shm-size 256m` 参数指定的 shm 大小不建议小于 256M，否则可能导致浏览器崩溃。

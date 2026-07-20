@@ -8,17 +8,31 @@ After login, browser is closed and session is kept alive via lightweight HTTP ch
 
 import os
 import pickle
+import socket
 import time
 
 import requests
 from loguru import logger
 
-from core import ATrustLogin, prompt_if_missing, load_credentials, save_credentials
+from core import ATrustLogin, prompt_if_missing, load_credentials, save_credentials, set_vpn_ready
 from sdu_cas import SDUCAS, DeviceFingerprint, CasException
 
 portal_addr = "https://vpn.sdu.edu.cn"
 cas_service = "https://vpn.sdu.edu.cn:443/passport/v1/auth/cas"
 online_url = "https://vpn.sdu.edu.cn/passport/v1/user/onlineInfo?clientType=SDPBrowserClient"
+
+
+def _ssh_proxy_is_alive() -> bool:
+    """Use the SSH dynamic forward as the effective VPN data-plane health check."""
+    if not os.environ.get("SSH_PROXY_HOST"):
+        return False
+
+    try:
+        port = int(os.environ.get("SSH_PROXY_LOCAL_PORT", "1081"))
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            return True
+    except (OSError, ValueError):
+        return False
 
 
 def _check_session(data_dir: str) -> bool:
@@ -109,6 +123,7 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
         driver_type=None, driver_path=None, browser_path=None,
         interactive=True, fingerprint=None):
 
+    set_vpn_ready(False)
     saved = load_credentials(data_dir)
     username = username if username is not None else saved.get("username")
     password = password if password is not None else saved.get("password")
@@ -134,6 +149,7 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
         exit(1)
 
     logger.info("Login success!")
+    set_vpn_ready(True)
 
     tolerance = 3
     while True:
@@ -146,6 +162,13 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
             time.sleep(keepalive)
 
             if not _check_session(data_dir):
+                if _ssh_proxy_is_alive():
+                    logger.warning(
+                        "Web session check failed, but the SSH SOCKS5 tunnel is active; "
+                        "keeping the current VPN session"
+                    )
+                    continue
+
                 logger.info("Session expired, re-authenticating via browser ...")
                 for i in range(3):
                     ok = _login_browser(data_dir, portal_addr,
@@ -154,10 +177,15 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
                     if ok:
                         logger.info("Session re-authenticated successfully")
                         tolerance = 3
+                        set_vpn_ready(True)
+                        break
                     else:
                         if i == 2:
-                            logger.error("Re-authentication failed after 3 attempts, exiting")
-                            exit(1)
+                            logger.error(
+                                "Re-authentication failed after 3 attempts; "
+                                "keeping the SSH proxy and retrying on the next keepalive cycle"
+                            )
+                            break
                         logger.warning(f"Re-authentication failed, {2 - i} retries left")
             else:
                 logger.debug("Session is active.")
