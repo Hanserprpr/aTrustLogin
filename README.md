@@ -42,17 +42,32 @@ docker build -t koishikiss/docker-sdu-atrust-autologin:custom .
 
 ### 3. 生成本地启动脚本
 
+macOS/Linux：
+
 ```shell
 cp docker/run-sdu-ssh-proxy.example.sh docker/run-sdu-ssh-proxy.sh
 chmod 700 docker/run-sdu-ssh-proxy.sh
 ```
 
-编辑 `docker/run-sdu-ssh-proxy.sh`，将所有 `CHANGE_ME` 替换为实际配置。该文件已加入 `.gitignore`，其中的真实账号和密码不会被 Git 提交。
+Windows PowerShell：
+
+```powershell
+Copy-Item docker/run-sdu-ssh-proxy.example.ps1 docker/run-sdu-ssh-proxy.ps1
+```
+
+编辑复制出的 `.sh` 或 `.ps1` 脚本，将所有 `CHANGE_ME` 替换为实际配置。这两个本地脚本均已加入 `.gitignore`，其中的真实账号和密码不会被 Git 提交。
 
 ### 4. 启动
 
 ```shell
 ./docker/run-sdu-ssh-proxy.sh
+```
+
+Windows PowerShell：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\docker\run-sdu-ssh-proxy.ps1
 ```
 
 看到以下内容即表示代理已就绪：
@@ -70,7 +85,7 @@ chmod 700 docker/run-sdu-ssh-proxy.sh
 
 ## 启动脚本配置
 
-[`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh) 是可公开提交的模板，不包含真实凭据。主要变量如下：
+[`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh) 和 [`docker/run-sdu-ssh-proxy.example.ps1`](docker/run-sdu-ssh-proxy.example.ps1) 是可公开提交的模板，不包含真实凭据。主要变量如下：
 
 | 变量 | 用途 |
 | --- | --- |
@@ -162,6 +177,18 @@ docker stop atrust
 ```
 
 这不会删除容器，也不会删除挂载在 `$HOME/.atrust-data` 中的数据。
+
+## Windows 支持
+
+Windows 版需要 Docker Desktop 使用 WSL 2 后端和 Linux containers 模式。PowerShell 脚本会在启动前检查 Docker 是否可用以及容器操作系统是否为 Linux。Windows 应用仍然使用 SOCKS5 `127.0.0.1:1080`。
+
+PowerShell 从 Windows 文件系统热更新已停止容器时，只复制不依赖 Unix 可执行权限的 Python 登录代码；SSH 代理 Shell 脚本由当前构建的镜像提供。如果修改了 `docker/bin/start-ssh-proxy.sh`，请先重新构建镜像。
+
+如果 Docker 报告找不到 `/dev/net/tun`，请更新 WSL/Docker Desktop，确认已切换到 Linux containers，并检查：
+
+```powershell
+docker run --rm --device /dev/net/tun --entrypoint sh koishikiss/docker-sdu-atrust-autologin:custom -c "test -c /dev/net/tun && echo TUN-OK"
+```
 
 ## 常见问题
 

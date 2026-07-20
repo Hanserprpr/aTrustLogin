@@ -36,10 +36,23 @@ cp docker/run-sdu-ssh-proxy.example.sh docker/run-sdu-ssh-proxy.sh
 chmod 700 docker/run-sdu-ssh-proxy.sh
 ```
 
-Replace every `CHANGE_ME` value in `docker/run-sdu-ssh-proxy.sh`, then start it:
+On Windows PowerShell, create the local runner with:
+
+```powershell
+Copy-Item docker/run-sdu-ssh-proxy.example.ps1 docker/run-sdu-ssh-proxy.ps1
+```
+
+Replace every `CHANGE_ME` value in the copied `.sh` or `.ps1` runner, then start it. On macOS/Linux:
 
 ```shell
 ./docker/run-sdu-ssh-proxy.sh
+```
+
+On Windows PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\docker\run-sdu-ssh-proxy.ps1
 ```
 
 The proxy is ready when the console prints:
@@ -56,7 +69,7 @@ The local runner is Git-ignored, so its real credentials are not committed.
 
 ## Configuration
 
-The public template is [`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh).
+The public templates are [`docker/run-sdu-ssh-proxy.example.sh`](docker/run-sdu-ssh-proxy.example.sh) and [`docker/run-sdu-ssh-proxy.example.ps1`](docker/run-sdu-ssh-proxy.example.ps1).
 
 | Variable | Purpose |
 | --- | --- |
@@ -146,6 +159,18 @@ docker stop atrust
 ```
 
 This preserves both the container and the data mounted at `$HOME/.atrust-data`.
+
+## Windows support
+
+Windows requires Docker Desktop with the WSL 2 backend in Linux containers mode. The PowerShell runner checks that Docker is reachable and that its container OS is Linux. Windows applications still connect to SOCKS5 at `127.0.0.1:1080`.
+
+When updating a stopped container from a Windows checkout, the PowerShell runner hot-copies only the Python login code, which does not require Unix executable permissions. The SSH proxy shell script comes from the currently built image. Rebuild the image first after changing `docker/bin/start-ssh-proxy.sh`.
+
+If Docker reports that `/dev/net/tun` is missing, update WSL and Docker Desktop, confirm Linux containers mode, and test it with:
+
+```powershell
+docker run --rm --device /dev/net/tun --entrypoint sh koishikiss/docker-sdu-atrust-autologin:custom -c "test -c /dev/net/tun && echo TUN-OK"
+```
 
 ## Troubleshooting
 

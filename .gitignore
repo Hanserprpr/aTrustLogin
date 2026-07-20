@@ -14,6 +14,7 @@ src/data/**
 
 # Local Docker runtime credentials
 docker/run-sdu-ssh-proxy.sh
+docker/run-sdu-ssh-proxy.ps1
 
 # AWS User-specific
 .idea/**/aws.xml
