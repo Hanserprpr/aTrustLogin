@@ -104,6 +104,18 @@ if (-not ($HasIdentityFile -or $HasPasswordFile -or $HasPassword)) {
 $AtrustDataDir = Join-Path $HOME ".atrust-data"
 New-Item -ItemType Directory -Force -Path $AtrustDataDir | Out-Null
 
+$DockerEnvironment = [ordered]@{
+    ATRUST_OPTS = $AtrustOpts
+    PASSWORD = $AtrustVncPassword
+    NODANTED = "1"
+    SSH_PROXY_HOST = $SshProxyHost
+    SSH_PROXY_PORT = $SshProxyPort
+    SSH_PROXY_USER = $SshProxyUser
+    SSH_PROXY_LOCAL_PORT = "1081"
+    SSH_PROXY_PUBLISHED_HOST = "127.0.0.1"
+    SSH_PROXY_PUBLISHED_PORT = "1080"
+}
+
 $DockerArgs = @(
     "run", "-it",
     "--name", $AtrustContainerName,
@@ -111,47 +123,53 @@ $DockerArgs = @(
     "--device", "/dev/net/tun",
     "--cap-add", "NET_ADMIN",
     "--sysctl", "net.ipv4.conf.default.route_localnet=1",
-    "-e", "ATRUST_OPTS=$AtrustOpts",
-    "-e", "PASSWORD=$AtrustVncPassword",
-    "-e", "NODANTED=1",
-    "-e", "SSH_PROXY_HOST=$SshProxyHost",
-    "-e", "SSH_PROXY_PORT=$SshProxyPort",
-    "-e", "SSH_PROXY_USER=$SshProxyUser",
-    "-e", "SSH_PROXY_LOCAL_PORT=1081",
-    "-e", "SSH_PROXY_PUBLISHED_HOST=127.0.0.1",
-    "-e", "SSH_PROXY_PUBLISHED_PORT=1080",
     "-v", "${AtrustDataDir}:/root",
     "-p", "10022:22",
     "-p", "127.0.0.1:1080:1081"
 )
 
 if (-not [string]::IsNullOrWhiteSpace($AtrustPingAddr)) {
-    $DockerArgs += @("-e", "PING_ADDR=$AtrustPingAddr")
+    $DockerEnvironment["PING_ADDR"] = $AtrustPingAddr
 }
 if (-not [string]::IsNullOrWhiteSpace($AtrustPingUrl)) {
-    $DockerArgs += @("-e", "PING_ADDR_URL=$AtrustPingUrl")
+    $DockerEnvironment["PING_ADDR_URL"] = $AtrustPingUrl
 }
 
 if ($HasIdentityFile) {
     $IdentityPath = (Resolve-Path -LiteralPath $SshProxyIdentityFile).Path
-    $DockerArgs += @(
-        "-e", "SSH_PROXY_IDENTITY_FILE=/run/secrets/ssh_proxy_key",
-        "-v", "${IdentityPath}:/run/secrets/ssh_proxy_key:ro"
-    )
+    $DockerEnvironment["SSH_PROXY_IDENTITY_FILE"] = "/run/secrets/ssh_proxy_key"
+    $DockerArgs += @("-v", "${IdentityPath}:/run/secrets/ssh_proxy_key:ro")
 }
 elseif ($HasPasswordFile) {
     $PasswordPath = (Resolve-Path -LiteralPath $SshProxyPasswordFile).Path
-    $DockerArgs += @(
-        "-e", "SSH_PROXY_PASSWORD_FILE=/run/secrets/ssh_proxy_password",
-        "-v", "${PasswordPath}:/run/secrets/ssh_proxy_password:ro"
-    )
+    $DockerEnvironment["SSH_PROXY_PASSWORD_FILE"] = "/run/secrets/ssh_proxy_password"
+    $DockerArgs += @("-v", "${PasswordPath}:/run/secrets/ssh_proxy_password:ro")
 }
 else {
-    $DockerArgs += @("-e", "SSH_PROXY_PASSWORD=$SshProxyPassword")
+    $DockerEnvironment["SSH_PROXY_PASSWORD"] = $SshProxyPassword
+}
+
+# Passing values containing embedded quotes directly to a native executable is
+# unreliable in Windows PowerShell 5.1. Export them to this process and let
+# Docker inherit each value by name instead.
+$PreviousEnvironment = @{}
+foreach ($Entry in $DockerEnvironment.GetEnumerator()) {
+    $Name = [string]$Entry.Key
+    $PreviousEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+    [Environment]::SetEnvironmentVariable($Name, [string]$Entry.Value, "Process")
+    $DockerArgs += @("-e", $Name)
 }
 
 $DockerArgs += $AtrustImage
 
 Write-Host "[Runner] Starting $AtrustContainerName with Docker Desktop Linux containers."
-& docker @DockerArgs
-exit $LASTEXITCODE
+try {
+    & docker @DockerArgs
+    $DockerExitCode = $LASTEXITCODE
+}
+finally {
+    foreach ($Entry in $PreviousEnvironment.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable([string]$Entry.Key, $Entry.Value, "Process")
+    }
+}
+exit $DockerExitCode

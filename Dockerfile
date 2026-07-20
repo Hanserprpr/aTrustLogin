@@ -23,6 +23,7 @@ EXPOSE 1081
 VOLUME ["/root", "/usr/share/sangfor/EasyConnect/resources/logs/"]
 
 RUN echo "Begin build" && \
+    sed -i 's/\r$//' /bin/start-with-autologin.sh /bin/start-with-autologin-actual.sh /bin/start-port-forwarding.sh /bin/start-ssh.sh /bin/start-ssh-proxy.sh && \
     sed -i 's|http://.*archive.ubuntu.com|https://mirrors.ustc.edu.cn|g; s|http://.*security.ubuntu.com|https://mirrors.ustc.edu.cn|g' /etc/apt/sources.list && \
     mkdir -p ~/.pip && \
     date > /etc/build-date.txt && \
