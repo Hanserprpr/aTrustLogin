@@ -48,8 +48,11 @@ if ($DockerOsType.Trim() -ne "linux") {
     throw "This image requires Docker Desktop in Linux containers mode."
 }
 
-& docker container inspect $AtrustContainerName 1>$null 2>$null
-$ContainerExists = $LASTEXITCODE -eq 0
+[string[]]$ExistingContainerNames = & docker container ls --all --format '{{.Names}}'
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to list Docker containers."
+}
+$ContainerExists = $ExistingContainerNames -contains $AtrustContainerName
 
 if ($ContainerExists) {
     Write-Host "[Runner] Reusing existing container: $AtrustContainerName"
