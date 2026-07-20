@@ -133,6 +133,13 @@ def run(username=None, password=None, keepalive=200, data_dir="./data",
     password = prompt_if_missing(password, "统一认证密码", interactive=interactive, required=True, secure=True)
     fingerprint = prompt_if_missing(fingerprint, "设备指纹", interactive=interactive, default="aTrustLogin")
 
+    # Python Fire converts numeric command-line values (such as student IDs)
+    # to integers.  CAS encryption and length fields operate on the original
+    # textual credentials, so normalize them before saving or encrypting them.
+    username = str(username)
+    password = str(password)
+    fingerprint = str(fingerprint)
+
     save_credentials(data_dir, {
         "username": username,
         "password": password,
